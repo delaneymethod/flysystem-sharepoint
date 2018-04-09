@@ -2,285 +2,184 @@
 
 namespace DelaneyMethod\FlysystemSharepoint;
 
+use Exception;
 use League\Flysystem\Config;
 use League\Flysystem\Util\MimeType;
 use DelaneyMethod\Sharepoint\Client;
 use League\Flysystem\Adapter\AbstractAdapter;
-use DelaneyMethod\Sharepoint\Exceptions\BadRequest;
 use League\Flysystem\Adapter\Polyfill\NotSupportingVisibilityTrait;
 
 class SharepointAdapter extends AbstractAdapter
 {
 	use NotSupportingVisibilityTrait;
 
-	/** @var \DelaneyMethod\Sharepoint\Client */
 	protected $client;
 
 	public function __construct(Client $client, string $prefix = '')
 	{
 		$this->client = $client;
 		
-		dd('construct', $this->client);
-		
 		$this->setPathPrefix($prefix);
 	}
 	
-	/**
-	 * {@inheritdoc}
-	 */
 	public function write($path, $contents, Config $config)
 	{
-		dd('write', $path, $contents);
-		
-		return $this->upload($path, $contents, 'add');
+		return $this->upload($path, $contents);
 	}
 	
-	/**
-	 * {@inheritdoc}
-	 */
 	public function writeStream($path, $resource, Config $config)
 	{
-		dd('writeStream', $path, $resource);
-		
-		return $this->upload($path, $resource, 'add');
+		return $this->upload($path, $resource);
 	}
 	
-	/**
-	 * {@inheritdoc}
-	 */
 	public function update($path, $contents, Config $config)
 	{
-		dd('update', $path, $contents);
-		
-		return $this->upload($path, $contents, 'overwrite');
+		return $this->upload($path, $contents);
 	}
 	
-	/**
-	 * {@inheritdoc}
-	 */
 	public function updateStream($path, $resource, Config $config)
 	{
-		dd('updateStream', $path, $resource);
-		
-		return $this->upload($path, $resource, 'overwrite');
+		return $this->upload($path, $resource);
 	}
 	
-	/**
-	 * {@inheritdoc}
-	 */
+	public function read($path)
+	{
+		if (!$response = $this->readStream($path)) {
+			return false;
+		}
+		
+		$response['contents'] = stream_get_contents($response['response']);
+		
+		fclose($response['response']);
+		
+		unset($response['response']);
+		
+		return $response;
+	}
+	
+	public function readStream($path)
+	{
+		$path = $this->applyPathPrefix($path);
+		
+		$response = $this->client->download($path);
+		
+		return compact('response');
+	}
+	
+	protected function upload($path, $contents)
+	{
+		$path = $this->applyPathPrefix($path);
+		
+		$response = $this->client->upload($path, $contents);
+		
+		return $this->normalizeResponse($response);
+	}
+	
 	public function rename($path, $newPath) : bool
 	{
 		$path = $this->applyPathPrefix($path);
 		
+		$mimeType = $this->getMimetype($path);
+		
 		$newPath = $this->applyPathPrefix($newPath);
 		
-		dd('rename', $path, $newpath);
-		
-		try {
-			$this->client->move($path, $newPath);
-		} catch (BadRequest $e) {
-			return false;
-		}
-		
-		return true;
+		return $this->client->rename($path, $newPath, $mimeType);
 	}
 	
-	/**
-	 * {@inheritdoc}
-	 */
 	public function copy($path, $newpath) : bool
 	{
 		$path = $this->applyPathPrefix($path);
 		
 		$newpath = $this->applyPathPrefix($newpath);
 		
-		dd('copy', $path, $newpath);
-		
-		try {
-			$this->client->copy($path, $newpath);
-		} catch (BadRequest $e) {
-			return false;
-		}
-		
-		return true;
+		return $this->client->copy($path, $newpath, $mimeType);
 	}
 	
-	/**
-	 * {@inheritdoc}
-	 */
 	public function delete($path) : bool
-	{
-		$location = $this->applyPathPrefix($path);
-		
-		dd('delete', $location);
-		
-		try {
-			$this->client->delete($location);
-		} catch (BadRequest $e) {
-			return false;
-		}
-		
-		return true;
-	}
-	
-	/**
-	 * {@inheritdoc}
-	 */
-	public function deleteDir($dirname) : bool
-	{
-		dd('deleteDir', $dirname);
-		
-		return $this->delete($dirname);
-	}
-	
-	/**
-	 * {@inheritdoc}
-	 */
-	public function createDir($dirname, Config $config)
-	{
-		$path = $this->applyPathPrefix($dirname);
-		
-		try {
-			$object = $this->client->createFolder($path);
-		} catch (BadRequest $e) {
-			return false;
-		}
-		
-		dd('createDir', $path, $object);
-		
-		return $this->normalizeResponse($object);
-	}
-	
-	/**
-	 * {@inheritdoc}
-	 */
-	public function has($path)
-	{
-		return $this->getMetadata($path);
-	}
-	
-	/**
-	 * {@inheritdoc}
-	 */
-	public function read($path)
-	{
-		if (!$object = $this->readStream($path)) {
-			return false;
-		}
-		
-		$object['contents'] = stream_get_contents($object['stream']);
-		
-		fclose($object['stream']);
-		
-		unset($object['stream']);
-		
-		dd('read', $path, $object);
-		
-		return $object;
-	}
-	
-	/**
-	 * {@inheritdoc}
-	 */
-	public function readStream($path)
 	{
 		$path = $this->applyPathPrefix($path);
 		
+		return $this->client->delete($path);
+	}
+	
+	public function deleteDir($dirname) : bool
+	{
+		return $this->delete($dirname);
+	}
+	
+	public function createDir($path, Config $config) : bool
+	{
+		$path = $this->applyPathPrefix($path);
+		
+		return $this->client->createFolder($path);
+	}
+	
+	public function has($path) : bool
+	{
 		try {
-			$stream = $this->client->download($path);
-		} catch (BadRequest $e) {
+			$path = $this->applyPathPrefix($path);
+			
+			$mimeType = $this->getMimetype($path);
+			
+			$metadata = $this->client->getMetadata($path, $mimeType);
+		
+			return true;
+		} catch (Exception $exception) {
 			return false;
 		}
-		
-		dd('readStream', $path, $stream);
-		
-		return compact('stream');
 	}
 	
-	/**
-	 * {@inheritdoc}
-	 */
-	public function listContents($directory = '', $recursive = false) : array
+	public function listContents($path = '', $recursive = false) : array
 	{
-		$location = $this->applyPathPrefix($directory);
-		
-		try {
-			$result = $this->client->listFolder($location, $recursive);
-		} catch (BadRequest $e) {
+		$path = $this->applyPathPrefix($path);
+			
+		$folders = $this->client->listFolder($path, $recursive);
+			
+		if (count($folders) === 0) {
 			return [];
 		}
 		
-		dd('listContents', $location, $result);
+		$allFolders = [];
 		
-		$entries = $result['entries'];
+		foreach ($folders as $folder) {
+			$object = $this->normalizeResponse($folder);
 		
-		while ($result['has_more']) {
-			$result = $this->client->listFolderContinue($result['cursor']);
+			array_push($allFolders, $object);
 			
-			$entries = array_merge($entries, $result['entries']);
+			if ($recursive) {
+				$allFolders = array_merge($allFolders, $this->listContents($folder['Name'], true));
+			}
 		}
 		
-		if (!count($entries)) {
-			return [];
-		}
-		
-		return array_map(function ($entry) {
-			$path = $this->removePathPrefix($entry['path_display']);
-			
-			return $this->normalizeResponse($entry, $path);
-		}, $entries);
+		return $allFolders;
 	}
 	
-	/**
-	 * {@inheritdoc}
-	 */
 	public function getMetadata($path)
 	{
 		$path = $this->applyPathPrefix($path);
 		
-		try {
-			$object = $this->client->getMetadata($path);
-		} catch (BadRequest $e) {
-			return false;
-		}
+		$mimeType = $this->getMimetype($path);
 		
-		dd('getMetadata', $object);
+		$metadata = $this->client->getMetadata($path, $mimeType);
 		
-		return $this->normalizeResponse($object);
+		return $this->normalizeResponse($metadata);
 	}
 	
-	/**
-	 * {@inheritdoc}
-	 */
 	public function getSize($path)
 	{
 		return $this->getMetadata($path);
 	}
 	
-	/**
-	 * {@inheritdoc}
-	 */
 	public function getMimetype($path)
 	{
 		return ['mimetype' => MimeType::detectByFilename($path)];
 	}
 	
-	/**
-	 * {@inheritdoc}
-	 */
 	public function getTimestamp($path)
 	{
 		return $this->getMetadata($path);
 	}
 	
-	public function getThumbnail(string $path, string $format = 'jpeg', string $size = 'w64h64')
-	{
-		return $this->client->getThumbnail($path, $format, $size);
-	}
-	
-	/**
-	 * {@inheritdoc}
-	 */
 	public function applyPathPrefix($path) : string
 	{
 		$path = parent::applyPathPrefix($path);
@@ -293,39 +192,20 @@ class SharepointAdapter extends AbstractAdapter
 		return $this->client;
 	}
 	
-	/**
-	 * @param string $path
-	 * @param resource|string $contents
-	 * @param string $mode
-	 *
-	 * @return array|false file metadata
-	 */
-	protected function upload(string $path, $contents, string $mode)
-	{
-		$path = $this->applyPathPrefix($path);
-		
-		try {
-			$object = $this->client->upload($path, $contents, $mode);
-		} catch (BadRequest $e) {
-			return false;
-		}
-		
-		dd('upload', $object);
-		
-		return $this->normalizeResponse($object);
-	}
-	
 	protected function normalizeResponse(array $response) : array
 	{
-		dd('normalizeResponse', $response);
+		list($normalizedPathPart1, $normalizedPathPart2) = explode('Shared Documents', $response['ServerRelativeUrl']);
 		
-		/*
-		$normalizedPath = ltrim($this->removePathPrefix($response['path_display']), '/');
+		$normalizedPath = ltrim($this->removePathPrefix($normalizedPathPart2), '/');
+	
+		$normalizedResponse = [
+			'path' => $normalizedPath
+		];
 		
-		$normalizedResponse = ['path' => $normalizedPath];
-		
-		if (isset($response['server_modified'])) {
-			$normalizedResponse['timestamp'] = strtotime($response['server_modified']);
+		if (isset($response['TimeLastModified'])) {
+			$normalizedResponse['timestamp'] = strtotime($response['TimeLastModified']);
+		} elseif (isset($response['Modified'])) {
+			$normalizedResponse['timestamp'] = strtotime($response['Modified']);
 		}
 		
 		if (isset($response['size'])) {
@@ -334,11 +214,10 @@ class SharepointAdapter extends AbstractAdapter
 			$normalizedResponse['bytes'] = $response['size'];
 		}
 		
-		$type = ($response['.tag'] === 'folder' ? 'dir' : 'file');
+		$type = ($response['__metadata']['type'] === 'SP.Folder' ? 'dir' : 'file');
 		
 		$normalizedResponse['type'] = $type;
 		
 		return $normalizedResponse;
-		*/
 	}
 }
