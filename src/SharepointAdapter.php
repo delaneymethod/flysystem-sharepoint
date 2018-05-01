@@ -83,7 +83,7 @@ class SharepointAdapter extends AbstractAdapter
 		
 		$newPath = $this->applyPathPrefix($newPath);
 		
-		return $this->client->rename($path, $newPath, $mimeType);
+		return $this->client->move($path, $newPath, $mimeType);
 	}
 	
 	public function copy($path, $newpath) : bool
