@@ -2,6 +2,10 @@
 
 All notable changes to `flysystem-sharepoint` will be documented in this file
 
+## 2.0.2 - 2018-05-07
+
+- Updated dependencies.
+
 ## 2.0.1 - 2018-05-01
 
 - Fixed `Call to undefined method DelaneyMethod\Sharepoint\Client::rename()` bug.
