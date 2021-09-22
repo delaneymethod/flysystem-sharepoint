@@ -18,7 +18,7 @@ class SharepointAdapterTest extends TestCase
 	/** @var \DelaneyMethod\FlysystemSharepoint\SharepointAdapter */
 	protected $sharepointAdapter;
 
-	public function setUp()
+	public function setUp(): void
 	{
 		$this->client = $this->prophesize(Client::class);
 
